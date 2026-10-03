@@ -1,1 +1,132 @@
-<!doctype html><meta charset="utf-8"><title>WC helper</title><p>Coming soon.</p>
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tipp-Erinnerung – nie wieder einen Spieltag verpassen | TipMaster</title>
+<meta name="description" content="Lade die Tipp-Deadlines des nächsten Spieltags in deinen Kalender – mit Erinnerung vor dem Anpfiff. Kostenlos, ohne Anmeldung.">
+<meta property="og:title" content="Tipp-Erinnerung: nie wieder einen Spieltag verpassen">
+<meta property="og:description" content="Alle Anstoßzeiten des nächsten Spieltags als Kalender-Erinnerung – ein Klick, fertig.">
+<style>
+:root{--bg:#0f1720;--card:#16212d;--ink:#e8eef4;--muted:#93a4b5;--acc:#2fbf71;--line:#24323f}
+@media (prefers-color-scheme: light){:root{--bg:#f4f7f9;--card:#fff;--ink:#14202b;--muted:#5b6b7a;--acc:#1f9d5a;--line:#dde5ec}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:720px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:1.6rem;margin:.2em 0}.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:0 0 16px}
+label{font-size:.85rem;color:var(--muted);display:block;margin-bottom:4px}
+select,button{font:inherit;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.row{display:flex;gap:12px;flex-wrap:wrap}.row>div{flex:1 1 180px}
+button.primary{background:var(--acc);color:#fff;border:0;font-weight:600;cursor:pointer;width:100%;margin-top:12px}
+button:disabled{opacity:.5;cursor:default}
+table{width:100%;border-collapse:collapse;font-size:.95rem}td{padding:8px 4px;border-bottom:1px solid var(--line);vertical-align:top}
+td.t{white-space:nowrap;color:var(--muted);width:1%}.dl{color:var(--acc);font-weight:600;white-space:nowrap}
+.note{font-size:.8rem;color:var(--muted)}.err{color:#e5484d}
+</style>
+</head>
+<body>
+<main>
+  <h1>Tipp-Erinnerung</h1>
+  <p class="sub">Nie wieder einen Spieltag verpassen: Hol dir die Anstoßzeiten des nächsten Spieltags als Kalender-Erinnerung – bevor dein Tippschein geschlossen wird.</p>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label for="liga">Wettbewerb</label>
+        <select id="liga">
+          <option value="bl1">1. Bundesliga</option>
+          <option value="bl2">2. Bundesliga</option>
+          <option value="ucl2026">Champions League</option>
+          <option value="dfb">DFB-Pokal</option>
+        </select>
+      </div>
+      <div>
+        <label for="vorlauf">Erinnern</label>
+        <select id="vorlauf">
+          <option value="60">1 Stunde vor Anpfiff</option>
+          <option value="180">3 Stunden vorher</option>
+          <option value="1440">1 Tag vorher</option>
+        </select>
+      </div>
+    </div>
+    <button class="primary" id="ics" disabled>Spieltag in meinen Kalender (.ics)</button>
+    <p class="note">Funktioniert mit Google Kalender, Apple Kalender und Outlook. Alle Zeiten in deutscher Zeit (Europe/Berlin).</p>
+  </div>
+
+  <div class="card">
+    <strong id="titel">Lade Spielplan…</strong>
+    <table id="tab"></table>
+  </div>
+
+  <p class="note">Daten: OpenLigaDB (frei, ohne Anmeldung). Prototyp für TipMaster – nächster Schritt: Erinnerung per WhatsApp/Telegram direkt aus der Liga.</p>
+</main>
+<script>
+const SEASON = 2026;
+const TZ = 'Europe/Berlin';
+const fmt = new Intl.DateTimeFormat('de-DE',{timeZone:TZ,weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+let current = [];
+
+async function load(){
+  const liga = document.getElementById('liga').value;
+  const titel = document.getElementById('titel'), tab = document.getElementById('tab'), btn = document.getElementById('ics');
+  titel.textContent = 'Lade Spielplan…'; tab.innerHTML=''; btn.disabled = true; current = [];
+  try{
+    const r = await fetch(`https://api.openligadb.de/getmatchdata/${liga}/${SEASON}`);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const all = await r.json();
+    const now = Date.now();
+    // naechster Spieltag = Gruppe des naechsten noch nicht angepfiffenen Spiels
+    const future = all.filter(m => !m.matchIsFinished && Date.parse(m.matchDateTimeUTC) > now)
+                      .sort((a,b)=>Date.parse(a.matchDateTimeUTC)-Date.parse(b.matchDateTimeUTC));
+    if(!future.length){ titel.textContent='Aktuell keine anstehenden Spiele.'; return; }
+    const gid = future[0].group.groupID;
+    current = future.filter(m => m.group.groupID === gid);
+    titel.textContent = `${current[0].group.groupName} · ${current.length} Spiele`;
+    const v = +document.getElementById('vorlauf').value;
+    tab.innerHTML = current.map(m => {
+      const k = new Date(m.matchDateTimeUTC);
+      const d = new Date(k.getTime() - v*60000);
+      return `<tr><td class="t">${fmt.format(k)}</td><td>${m.team1.teamName} – ${m.team2.teamName}</td><td class="dl">⏰ ${fmt.format(d)}</td></tr>`;
+    }).join('');
+    btn.disabled = false;
+  }catch(e){
+    titel.innerHTML = '<span class="err">Spielplan gerade nicht erreichbar. Bitte später erneut versuchen.</span>';
+  }
+}
+
+function icsDate(d){ return d.toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,''); }
+function esc(s){ return String(s).replace(/[\\,;]/g, c => '\\'+c); }
+
+function downloadIcs(){
+  const v = +document.getElementById('vorlauf').value;
+  const stamp = icsDate(new Date());
+  const lines = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//TipMaster Prototype//Tipp-Erinnerung//DE','CALSCALE:GREGORIAN','METHOD:PUBLISH'];
+  for(const m of current){
+    const start = new Date(m.matchDateTimeUTC);
+    const end = new Date(start.getTime() + 105*60000);
+    lines.push('BEGIN:VEVENT',
+      `UID:tipmaster-${m.matchID}@prototype`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART:${icsDate(start)}`,
+      `DTEND:${icsDate(end)}`,
+      `SUMMARY:${esc('Tipp abgeben: '+m.team1.shortName+' – '+m.team2.shortName)}`,
+      `DESCRIPTION:${esc('Tippschein schließt mit Anpfiff. Jetzt tippen auf tipmaster.de')}`,
+      'URL:https://tipmaster.de/',
+      'BEGIN:VALARM','ACTION:DISPLAY',`DESCRIPTION:${esc('Noch nicht getippt? '+m.team1.shortName+' – '+m.team2.shortName)}`,`TRIGGER:-PT${v}M`,'END:VALARM',
+      'END:VEVENT');
+  }
+  lines.push('END:VCALENDAR');
+  const blob = new Blob([lines.join('\r\n')], {type:'text/calendar;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `tipmaster-${(current[0]?.group.groupName||'spieltag').replace(/\W+/g,'-')}.ics`;
+  a.click();
+}
+
+document.getElementById('liga').addEventListener('change', load);
+document.getElementById('vorlauf').addEventListener('change', load);
+document.getElementById('ics').addEventListener('click', downloadIcs);
+load();
+</script>
+</body>
+</html>
